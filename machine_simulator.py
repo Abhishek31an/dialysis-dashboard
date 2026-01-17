@@ -2,7 +2,7 @@ import requests
 import time
 import random
 
-API_URL = "http://127.0.0.1:8000"
+API_URL = "https://dialysis-backend.onrender.com"
 machine_state = {
     "M1": {"total_vol": 0.0},
     "M2": {"total_vol": 0.0}
