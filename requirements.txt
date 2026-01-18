@@ -6,3 +6,4 @@ pydantic
 requests
 streamlit
 protobuf
+pandas

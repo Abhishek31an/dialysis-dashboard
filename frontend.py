@@ -1,157 +1,148 @@
 import streamlit as st
 import requests
+import pandas as pd
 import time
 
-# --- CONFIG ---
-# OLD: API_URL = "http://127.0.0.1:8000"
+# -----------------------------------------------------------------------------
+# CONFIGURATION
+# -----------------------------------------------------------------------------
+# Replace this with your actual Render Backend URL
 API_URL = "https://dialysis-backend.onrender.com"
-st.set_page_config(page_title="Dialysis Monitor", layout="wide")
 
-# --- SESSION STATE ---
-if 'page' not in st.session_state:
-    st.session_state['page'] = 'login'
-if 'selected_machine' not in st.session_state:
-    st.session_state['selected_machine'] = None
-if 'user' not in st.session_state:
-    st.session_state['user'] = None
-if 'live_mode' not in st.session_state: # New flag to control the loop
-    st.session_state['live_mode'] = False
+st.set_page_config(
+    page_title="Dialysis Remote Monitor",
+    page_icon="🏥",
+    layout="wide"
+)
 
-# --- HELPER FUNCTIONS ---
-def login_user(username, password):
+# -----------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# -----------------------------------------------------------------------------
+
+def get_machines():
+    """Fetch the list of active machines from the backend."""
     try:
-        res = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
-        if res.status_code == 200:
-            return True
-        return False
+        response = requests.get(f"{API_URL}/machines")
+        if response.status_code == 200:
+            return response.json()
+        return []
     except:
-        st.error("Cannot connect to Backend.")
-        return False
+        return []
 
-# --- PAGE 1: LOGIN ---
-def show_login():
-    st.markdown("<h1 style='text-align: center;'>🏥 NephroCare Monitor</h1>", unsafe_allow_html=True)
-    st.markdown("---")
+def get_latest_data(machine_id):
+    """Fetch the single most recent data point for the live cards."""
+    try:
+        response = requests.get(f"{API_URL}/data/{machine_id}")
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except:
+        return None
+
+def get_history_data(machine_id):
+    """Fetch the last 100 data points for the trend graphs."""
+    try:
+        response = requests.get(f"{API_URL}/history/{machine_id}")
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except:
+        return []
+
+# -----------------------------------------------------------------------------
+# MAIN DASHBOARD UI
+# -----------------------------------------------------------------------------
+
+st.title("🏥 Renal Care - Remote Dialysis Monitor")
+st.markdown("Real-time telemetry and trend monitoring for ICU Units.")
+st.divider()
+
+# --- SIDEBAR: Machine Selection ---
+st.sidebar.header("Control Panel")
+machines = get_machines()
+
+if not machines:
+    st.warning("⚠️ No machines detected. Please run the simulator.")
+    st.stop() # Stop execution if no machines
+
+# Create a dropdown to select a machine
+machine_ids = [m['machine_id'] for m in machines]
+selected_machine = st.sidebar.selectbox("Select Patient Monitor:", machine_ids)
+
+# Add a manual refresh button
+if st.sidebar.button("🔄 Refresh Data"):
+    st.rerun()
+
+# --- MAIN DISPLAY ---
+
+# 1. Fetch Data
+current_data = get_latest_data(selected_machine)
+history_data = get_history_data(selected_machine)
+
+# 2. Display Live Metrics (The "Now" View)
+st.subheader(f"📍 Live Status: {selected_machine}")
+
+if current_data:
+    # Create 3 columns for big numbers
+    col1, col2, col3 = st.columns(3)
     
-    col1, col2, col3 = st.columns([1,1,1])
+    with col1:
+        st.metric(
+            label="🌡️ Temperature",
+            value=f"{current_data.get('temperature', 0)} °F",
+            delta="Normal" if 97 < current_data.get('temperature', 0) < 99 else "Warning",
+            delta_color="normal" if 97 < current_data.get('temperature', 0) < 99 else "inverse"
+        )
+    
     with col2:
-        st.subheader("Doctor Login")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
+        st.metric(
+            label="❤️ Heart Rate",
+            value=f"{current_data.get('heart_rate', 0)} BPM",
+            delta="-2 bpm" # You can make this dynamic later
+        )
         
-        if st.button("Sign In", use_container_width=True):
-            if login_user(username, password):
-                st.session_state['user'] = username
-                st.session_state['page'] = 'dashboard'
-                st.rerun()
-            else:
-                st.error("Invalid Username or Password")
+    with col3:
+        st.metric(
+            label="💧 Flow Rate",
+            value=f"{current_data.get('flow_rate', 0)} ml/min"
+        )
+else:
+    st.info("Waiting for data stream...")
 
-# --- PAGE 2: DASHBOARD ---
-def show_dashboard():
-    st.title(f"👨‍⚕️ Welcome, Dr. {st.session_state['user']}")
+# 3. Display History Graphs (The "Trend" View)
+st.divider()
+st.subheader("📈 Patient Trends (Last 100 Readings)")
+
+if history_data:
+    # Convert the JSON list to a Pandas DataFrame (Excel sheet format)
+    df = pd.DataFrame(history_data)
     
-    # Auto-refresh button for the main dashboard (optional)
-    if st.button("🔄 Refresh List"):
-        st.rerun()
-        
-    st.markdown("---")
-    
-    # Fetch Machines from Backend
-    try:
-        machines = requests.get(f"{API_URL}/machines").json()
-    except:
-        st.error("Backend is offline.")
-        machines = []
+    # Convert timestamp string to datetime objects for better graphing
+    if 'timestamp' in df.columns:
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-    if not machines:
-        st.warning("No machines found.")
-        return
+    # Create Tabs for different graphs to keep UI clean
+    tab1, tab2, tab3 = st.tabs(["Temperature History", "Heart Rate History", "Raw Data Log"])
 
-    # Create a grid of cards
-    cols = st.columns(3)
-    for index, machine in enumerate(machines):
-        with cols[index % 3]:
-            status_emoji = "🟢 Active" if machine['is_active'] else "🔴 Offline"
-            
-            with st.container(border=True):
-                st.markdown(f"### 🖥 {machine['machine_id']}")
-                st.caption(f"📍 {machine['location']}")
-                st.markdown(f"**Status:** {status_emoji}")
-                
-                # When clicked, we enter "Live Mode"
-                if st.button(f"View Live Data", key=machine['machine_id']):
-                    st.session_state['selected_machine'] = machine['machine_id']
-                    st.session_state['live_mode'] = True 
-                    st.session_state['page'] = 'details'
-                    st.rerun()
+    with tab1:
+        st.write("Temperature vs Time")
+        # Line chart using 'timestamp' as X-axis and 'temperature' as Y-axis
+        st.line_chart(df, x="timestamp", y="temperature", color="#FF4B4B") # Red color
 
-# --- PAGE 3: DETAILS (LIVE) ---
-def show_details():
-    m_id = st.session_state['selected_machine']
-    
-    # Header area
-    c1, c2 = st.columns([1, 8])
-    with c1:
-        # Button to STOP the loop and go back
-        if st.button("⬅ Stop"):
-            st.session_state['live_mode'] = False
-            st.session_state['page'] = 'dashboard'
-            st.rerun()
-    with c2:
-        st.title(f"Live Telemetry: {m_id}")
+    with tab2:
+        st.write("Heart Rate vs Time")
+        st.line_chart(df, x="timestamp", y="heart_rate", color="#0068C9") # Blue color
 
-    # Create a placeholder. This container will be wiped and redrawn every second.
-    live_container = st.empty()
+    with tab3:
+        st.write("Detailed Data Logs")
+        st.dataframe(df)
 
-    # THE LIVE LOOP
-    while st.session_state['live_mode']:
-        try:
-            # 1. Fetch Data
-            data = requests.get(f"{API_URL}/machine-status/{m_id}").json()
-            
-            # 2. Draw Inside the Placeholder
-            with live_container.container():
-                
-                # --- ROW 1 (4 Columns) ---
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("🌡 Temp", f"{data.get('temperature', 0)} °C")
-                k2.metric("💧 Flow Rate", f"{data.get('flow_rate', 0)} ml/min")
-                k3.metric("🧪 pH Level", f"{data.get('ph', 0)}", "7.35-7.45")
-                k4.metric("⚡ Conductivity", f"{data.get('conductivity', 0)} mS/cm")
+else:
+    st.write("No history data available yet.")
 
-                st.markdown("---") # Visual separator
-
-                # --- ROW 2 (4 Columns for Alignment) ---
-                # We use 4 columns again so 'Blood Leak' aligns perfectly under 'Temp'
-                j1, j2, j3, j4 = st.columns(4)
-                
-                # Blood Leak Logic
-                leak = data.get('blood_leak', False)
-                status_text = "⚠️ LEAK DETECTED" if leak else "✅ SAFE"
-                status_color = "inverse" if leak else "normal"
-                j1.metric("🩸 Blood Leak", status_text, delta_color=status_color)
-
-                j2.metric("🌫 Turbidity", f"{data.get('turbidity', 0)} NTU")
-                
-                # Volume Logic
-                vol = data.get('total_volume', 0)
-                vol_str = f"{vol/1000:.2f} L" if vol > 1000 else f"{vol:.0f} mL"
-                j3.metric("📊 Total Vol", vol_str)
-                
-                j4.info(f"Last Update:\n{data.get('timestamp', '')[11:19]}") # Show Time Only
-
-            # 3. Wait before next update (matches your simulator speed)
-            time.sleep(2)
-            
-        except Exception as e:
-            st.error(f"Connection lost: {e}")
-            break
-
-# --- MAIN CONTROLLER ---
-if st.session_state['page'] == 'login':
-    show_login()
-elif st.session_state['page'] == 'dashboard':
-    show_dashboard()
-elif st.session_state['page'] == 'details':
-    show_details()
+# -----------------------------------------------------------------------------
+# AUTO-REFRESH LOGIC
+# -----------------------------------------------------------------------------
+# This keeps the dashboard updating every 2 seconds automatically
+time.sleep(2)
+st.rerun()
