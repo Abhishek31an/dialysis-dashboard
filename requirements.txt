@@ -1,9 +1,9 @@
 fastapi
 uvicorn
+websockets
 mysql-connector-python
 python-dotenv
 pydantic
-requests
 streamlit
-protobuf
+requests
 pandas
