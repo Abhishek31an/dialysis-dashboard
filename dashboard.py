@@ -4,7 +4,7 @@ import pandas as pd
 import time
 
 # --- CONFIG ---
-API_URL = "https://dialysis-backend.onrender.com"
+API_URL= "wss://dialysis-backend.onrender.com/ws/machine/M1"
 
 st.set_page_config(page_title="Dialysis Monitor", layout="wide", page_icon="🩸")
 
